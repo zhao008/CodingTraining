@@ -1,0 +1,45 @@
+# ===== 编译产物 =====
+# 目标文件、库
+*.o
+*.obj
+*.a
+*.so
+*.lib
+*.dll
+*.exe
+*.out
+
+# 构建目录
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+
+# 本项目的可执行文件（Linux 下没有扩展名，只能按名字列出）
+scoreboard
+scoreboard_*
+
+# ===== 调试 / 运行时生成 =====
+core
+core.*
+vgcore.*
+*.dSYM/
+*.gcno
+*.gcda
+*.gcov
+
+# ===== 编辑器 / IDE =====
+.vscode/
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*~
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== Claude Code 本地配置 =====
+.claude/settings.local.json
