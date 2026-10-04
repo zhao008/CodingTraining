@@ -36,7 +36,7 @@ struct ExpectedToken {
 void expect_tokens(const TokenizeResult& result,
                    const std::vector<ExpectedToken>& expected,
                    int line_number = 1) {
-    // print_tokens(result.tokens);
+    //print_tokens(result.tokens);
     ASSERT_EQ(result.tokens.size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         SCOPED_TRACE("token #" + std::to_string(i));

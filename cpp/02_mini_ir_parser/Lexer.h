@@ -81,7 +81,7 @@ public:
                 token_name.push_back(line[i]);
                 i++;
                 if(is_letter(line[i])){
-                    while(line[i]!= ' ' && line[i]!= ',' && i < line.size()){
+                    while(i < line.size() && (is_letter(line[i]) || is_int(line[i]) || line[i]=='_')){
                         token_name.push_back(line[i]);
                         i ++ ;
                     }  
@@ -97,7 +97,7 @@ public:
             else if(is_letter(line[i]) || line[i] == '_' ){
                 token_name.push_back(line[i]);
                 i++;
-                while(line[i] != ' ' && i < line.size()){
+                while(i < line.size() && (is_letter(line[i]) || is_int(line[i]) || line[i]=='_')){
                     token_name.push_back(line[i]);
                     i ++ ;
                 }  
@@ -109,7 +109,7 @@ public:
                 auto token_is_letter = false;
                 token_name.push_back(line[i]);
                 i++;
-                while((is_int(line[i]) || is_letter(line[i])) && i < line.size()){
+                while(i < line.size() && (is_int(line[i]) || is_letter(line[i]))){
                     token_name.push_back(line[i]);
                     if(is_letter(line[i]))
                         token_is_letter = true;
