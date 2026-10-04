@@ -56,7 +56,7 @@ inline void print_tokens(const std::vector<Token>& tokens){
 class Lexer{
 
 public:
-    void tokenize_line(std::string_view line, size_t line_number){
+    void tokenize_line(std::string_view line, size_t line_number){        
         size_t i = 0;
         SourceLocation token_loca;
         token_loca.column = 1;
@@ -66,6 +66,8 @@ public:
         LexError error;
         std::string token_name;
         
+        lexToken_[line_number] = TokenizeResult{};
+
         while(i < line.size()){
             //decode input
             if (line[i]==' ' || line[i]=='\t') {

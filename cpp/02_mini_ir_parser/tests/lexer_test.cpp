@@ -154,7 +154,8 @@ TEST(LexerTest, RejectsInvalidValues) {
 // Test 10：识别出Identifier
 TEST(LexerTest, IdentifierLexer){
     auto result = lex("add.int32");
-    ASSERT_FALSE(result.tokens.empty());
+    ASSERT_EQ(result.tokens.size(), 1u);
+    EXPECT_EQ(result.tokens[0].lexeme, "add.int32");
     const Token& last = result.tokens.back();
     EXPECT_EQ(last.kind, TokenKind::Identifier);
 }
