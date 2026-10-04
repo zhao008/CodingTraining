@@ -150,3 +150,11 @@ TEST(LexerTest, RejectsInvalidValues) {
         EXPECT_EQ(result.error->location.column, 1);
     }
 }
+
+// Test 10：识别出Identifier
+TEST(LexerTest, IdentifierLexer){
+    auto result = lex("add.int32");
+    ASSERT_FALSE(result.tokens.empty());
+    const Token& last = result.tokens.back();
+    EXPECT_EQ(last.kind, TokenKind::Identifier);
+}

@@ -68,7 +68,7 @@ public:
         
         while(i < line.size()){
             //decode input
-            if (line[i] == ' ') {
+            if (line[i]==' ' || line[i]=='\t') {
                 i++;
                 token_loca.column ++;
                 continue;
@@ -97,7 +97,7 @@ public:
             else if(is_letter(line[i]) || line[i] == '_' ){
                 token_name.push_back(line[i]);
                 i++;
-                while(i < line.size() && (is_letter(line[i]) || is_int(line[i]) || line[i]=='_')){
+                while(i < line.size() && (is_letter(line[i]) || is_int(line[i]) || line[i]=='_' || line[i]=='.')){
                     token_name.push_back(line[i]);
                     i ++ ;
                 }  
