@@ -80,7 +80,7 @@ public:
             else if(line[i] == '%'){
                 token_name.push_back(line[i]);
                 i++;
-                if(is_letter(line[i])){
+                if(i < line.size() && is_letter(line[i])){
                     while(i < line.size() && (is_letter(line[i]) || is_int(line[i]) || line[i]=='_')){
                         token_name.push_back(line[i]);
                         i ++ ;
@@ -106,24 +106,15 @@ public:
                 token_name = "";
             }
             else if(is_int(line[i])){
-                auto token_is_letter = false;
                 token_name.push_back(line[i]);
                 i++;
-                while(i < line.size() && (is_int(line[i]) || is_letter(line[i]))){
+                while(i < line.size() && is_int(line[i])){
                     token_name.push_back(line[i]);
-                    if(is_letter(line[i]))
-                        token_is_letter = true;
                     i ++ ;
                 }  
-                if(token_is_letter){
-                    push_token(TokenKind::Identifier, token_name, token_loca, line_number);
-                    token_loca.column += token_name.size();
-                } 
-                else{
-                    push_token(TokenKind::Integer, token_name, token_loca, line_number);
-                    token_loca.column += token_name.size();                   
-                }
-                token_name = "";                  
+                push_token(TokenKind::Integer, token_name, token_loca, line_number);
+                token_loca.column += token_name.size();                   
+                token_name = "";                 
             }
             else if(line[i] == '='){
                 push_token(TokenKind::Equal, "=", token_loca, line_number);

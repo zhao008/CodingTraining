@@ -134,8 +134,19 @@ TEST(LexerTest, IllegalCharacter) {
 // Test 8：不完整 Value
 TEST(LexerTest, IncompleteValue) {
     auto result = lex("% = add %r1, %r2");
-    print_tokens(result.tokens);
+    //print_tokens(result.tokens);
     ASSERT_TRUE(result.error.has_value());
     EXPECT_EQ(result.error->location.line, 1);
     EXPECT_EQ(result.error->location.column, 1);
+}
+
+// Test 9：识别出错误的的 Value
+TEST(LexerTest, RejectsInvalidValues) {
+    for (const auto& input : {"%0", "%_test"}) {
+        auto result = lex(input);
+
+        ASSERT_TRUE(result.error.has_value()) << input;
+        EXPECT_EQ(result.error->location.line, 1);
+        EXPECT_EQ(result.error->location.column, 1);
+    }
 }
