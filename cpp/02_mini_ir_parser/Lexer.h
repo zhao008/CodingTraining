@@ -134,6 +134,7 @@ public:
             }
         }
     };
+    
     const std::map<size_t, TokenizeResult>& results() const { return lexToken_; }
 
 private:

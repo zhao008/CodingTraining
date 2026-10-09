@@ -34,3 +34,8 @@ target_link_libraries(lexer_test PRIVATE GTest::gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(lexer_test)
+
+add_executable(parser_test tests/parser.cpp)
+target_include_directories(parser_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(parser_test PRIVATE GTest::gtest_main)
+gtest_discover_tests(parser_test)
