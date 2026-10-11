@@ -39,3 +39,8 @@ add_executable(parser_test tests/parser.cpp)
 target_include_directories(parser_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(parser_test PRIVATE GTest::gtest_main)
 gtest_discover_tests(parser_test)
+
+add_executable(defuser_test tests/defuser.cpp)
+target_include_directories(defuser_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(defuser_test PRIVATE GTest::gtest_main)
+gtest_discover_tests(defuser_test)

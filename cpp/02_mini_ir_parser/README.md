@@ -1,291 +1,277 @@
-# Mini IR：文本解析与静态分析练习
+# Mini IR：def-use 分析实验
 
-使用 C++20，把简单的 IR 文本逐步转换成可分析的指令表示。
+工程目录：`cpp/02_mini_ir_parser/`。
 
-工程始终放在 `cpp/02_mini_ir_parser/` 中，各阶段在现有代码上继续。
+当前进度：Lexer、Parser 已完成，本轮实现 def-use 分析。
 
-**当前进度：Lexer 已完成，下一步实现 Parser。** 每个模块可以分几次训练完成，完成后先 Review，再进入下一阶段。
+## 1. 实验目标
 
-## 1. 项目目标与阶段
+接收 Parser 生成的指令列表，建立两种关系：
 
-| 阶段 | 输入与输出 | 状态 |
-|---|---|---|
-| Lexer | 一行文本 → Token 序列和词法错误 | 已完成 |
-| Parser | 一行 Token → Instruction 或语法错误 | 当前任务 |
-| Definition/Use 分析 | 指令列表 → 值的定义与使用关系 | 后续 |
-| 依赖 DAG | 纯算术指令 → 数据依赖图 | 后续 |
-| 工具整合 | 读取 `.ir` 文件 → 输出解析和分析结果 | 后续 |
+- use-def：某个操作数的值由哪条指令产生。
+- def-use：某个值被哪些指令的哪些操作数使用。
 
-项目终点是完成“读文件、解析、建立 def-use、输出依赖图”。
+同时检查：
 
-随后转入真正的 LLVM IR 分析，再逐步接触数据流分析、LLVM/MLIR Pass 和 Triton 编译链。
+- 使用未定义的值。
+- 同一个值被重复定义。
+- destination 与外部输入重名。
 
-后续分析阶段将约定每个值只定义一次，外部输入显式提供。`load/store` 可以解析；指令重排涉及的内存依赖在后续单独讨论。
+本轮不执行运算、不做调度、不分析内存别名。
 
-## 2. 工程文件
+## 2. 示例
 
-以下路径均相对于 `cpp/02_mini_ir_parser/`：
-
-| 文件 | 用途 | 当前动作 |
-|---|---|---|
-| `README.md` | 项目规则、当前任务和验收方式 | 随阶段更新 |
-| `Lexer.h` | Token、位置、词法错误和 Lexer | 继续复用 |
-| `Parser.h` | Instruction、解析错误和 Parser | 本轮新增 |
-| `main.cpp` | 程序入口，目前尚未接入完整处理流程 | 后续整合 |
-| `tests/lexer_test.cpp` | 已有 Lexer 测试 | 保留 |
-| `tests/parser_test.cpp` | Parser 测试 | 本轮新增 |
-| `CMakeLists.txt` | C++20、Google Test、Sanitizer 配置 | 加入 Parser 测试目标 |
-
-## 3. 输入示例
-
-每行最多包含一条指令：
+声明 `%x` 是外部输入：
 
 ```text
-%r1 = add %r2, %r3
-%r4 = mul %r1, %r5
-%r6 = load %ptr
-store %r4, %ptr
-ret %r4
-%r7 = add %r4, 42
+%a = add %x, 1
+%b = mul %a, 2
+%c = add %a, %b
+ret %c
 ```
 
-空格和 Tab 都是空白；`#` 开始行注释。标点两侧不要求有空格：
+指令编号采用 vector 下标，从 0 开始。
 
-```text
-%r1=add %r2,42  # 等价于带空格的写法
-```
+| 编号 | 定义的值 | 操作数来源 |
+|---:|---|---|
+| 0 | `%a` | 外部输入 `%x`、常量 `1` |
+| 1 | `%b` | 指令 0、常量 `2` |
+| 2 | `%c` | 指令 0、指令 1 |
+| 3 | 无 | 指令 2 |
 
-本阶段允许出现尚未定义的 `%r2`、`%ptr` 等名字。是否已经定义属于后续语义分析。
+使用位置表示为 `(指令编号, 操作数下标)`：
 
-## 4. 已确定的词法规则
-
-这里的字母指 ASCII `A–Z`、`a–z`，数字指 `0–9`。
-
-| Token 类型 | 规则 | 示例 |
-|---|---|---|
-| `Identifier` | 字母或 `_` 开头；后续允许字母、数字、`_`、`.` | `add`、`ase_1`、`add.int32` |
-| `Value` | `%` 后必须以字母开头；后续允许字母、数字、`_` | `%r1`、`%ptr`、`%tmp_0` |
-| `Integer` | 一个或多个十进制数字 | `0`、`42`、`1000` |
-| `Equal` | 单个 `=` | `=` |
-| `Comma` | 单个 `,` | `,` |
-
-约定：
-
-- 单独的 `%`、`%0`、`%_tmp` 报词法错误。
-- `1000aad` 拆成 `Integer("1000")` 和 `Identifier("aad")`，由 Parser 检查组合是否合法。
-- `add@` 先得到 `Identifier("add")`，然后在 `@` 处报错。
-- 遇到第一个词法错误就停止本行扫描，保留此前已经识别的 Token。
-- 行号、列号从 1 开始；当前 Tab 按一个字符计列，不计算终端显示宽度。
-- 当前没有负数、浮点数、多进制数、字符串、括号和跨行语句的语法支持。
-
-`add.int32` 是合法的 Identifier，但本轮 Parser 只支持下文列出的五种 opcode。词法上能识别一个名字，不等于语法上支持这条指令。
-
-## 5. 现有 Lexer 接口
-
-现有数据结构在 `Lexer.h` 中，Parser 直接复用，不需要重新定义：
-
-```cpp
-struct SourceLocation {
-    size_t line;
-    size_t column;
-};
-
-struct Token {
-    TokenKind kind;
-    std::string lexeme;
-    SourceLocation location;
-};
-
-struct LexError {
-    std::string message;
-    SourceLocation location;
-};
-
-struct TokenizeResult {
-    std::vector<Token> tokens;
-    std::optional<LexError> error;
-};
-```
-
-Lexer 当前是一个保存各行结果的类，其公开接口为：
-
-```cpp
-void tokenize_line(std::string_view line, size_t line_number);
-
-const std::map<size_t, TokenizeResult>& results() const;
-```
-
-调用方式：
-
-```cpp
-Lexer lexer;
-lexer.tokenize_line("%r1 = add %r2, 42", 1);
-
-const auto& result = lexer.results().at(1);
-```
-
-每次调用会先清空该行的旧 Token 和错误，再重新扫描；其他行保持原样。空行和纯注释行得到空 Token 列表，无错误。
-
-输入使用 `std::string_view`，Token 的 `lexeme` 使用 `std::string` 拥有文本。Lexer 不需要长期保存输入视图。
-
-**只有在 `result.error` 为空时，才把 `result.tokens` 交给 Parser。** 词法出错时，已有 Token 只是一段不完整的输入。
-
-## 6. 当前任务：实现 Parser
-
-### 6.1 目标
-
-把这一行的 Token：
-
-```text
-Value("%r1"), Equal("="), Identifier("add"),
-Value("%r2"), Comma(","), Integer("42")
-```
-
-组织成一条指令：
-
-| 字段 | 内容 |
+| 值 | 使用位置 |
 |---|---|
-| `destination` | `%r1` 对应的 Token |
-| `opcode` | `add` 对应的 Token |
-| `operands[0]` | `%r2` 对应的 Token |
-| `operands[1]` | `42` 对应的 Token |
+| `%x` | `(0, 0)` |
+| `%a` | `(1, 0)`、`(2, 0)` |
+| `%b` | `(2, 1)` |
+| `%c` | `(3, 0)` |
 
-`=` 和 `,` 用于检查语法，不放入最终操作数列表。
+指令编号不同于源码行号。错误诊断使用 Token 保存的 SourceLocation。
 
-### 6.2 数据结构和接口
+## 3. 文件安排
 
-在 `Parser.h` 中包含 `Lexer.h`，定义：
+| 文件 | 本轮动作 |
+|---|---|
+| `Lexer.h` | 复用 |
+| `Parser.h` | 复用 |
+| `DefUse.h` | 新增分析结构和函数 |
+| `tests/def_use_test.cpp` | 新增测试 |
+| `CMakeLists.txt` | 加入测试目标 |
+
+保留现有 Lexer 和 Parser 测试。
+
+## 4. 输入准备
+
+当前 Parser 的调用方式：
+
+```cpp
+Parser parser;
+parser.parser_tokenize_line(lexer.results());
+```
+
+调用方先检查全部 ParseResult：
+
+1. 任意一行存在 error，就报告错误，不进行 def-use 分析。
+2. 全部无错误后，按源码行号顺序收集有效 Instruction。
+3. 空行、注释行跳过，不占指令编号。
+
+得到：
+
+```cpp
+std::vector<Instruction> instructions;
+```
+
+外部输入通过函数参数显式提供，不新增文本语法：
+
+```cpp
+std::unordered_set<std::string> external_inputs{"%x"};
+```
+
+## 5. 数据结构
+
+建立关系时，用哈希表按名字查询定义者；建立后，保存指令编号，通过 vector 下标直接访问。
+
+在 `DefUse.h` 中定义：
 
 ```cpp
 #pragma once
 
-#include "Lexer.h"
+#include "Parser.h"
 
+#include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
-struct Instruction {
-    std::optional<Token> destination;
-    Token opcode;
-    std::vector<Token> operands;
+using InstructionId = std::size_t;
+
+// 来源分类，不是 int/float 等数值类型。
+enum class SourceKind {
+    Instruction,    // 前面某条指令产生的值
+    ExternalInput,  // 调用方显式声明的外部输入
+    Constant        // 直接写出的整数常量
 };
 
-struct ParseError {
+struct SourceRef {
+    SourceKind kind;
+    std::optional<InstructionId> defining_instruction;
+};
+
+struct InstructionUseInfo {
+    std::vector<SourceRef> sources;
+};
+
+struct UseSite {
+    InstructionId instruction_index;
+    std::size_t operand_index;
+};
+
+struct DefUseInfo {
+    std::unordered_map<std::string, InstructionId> definitions;
+    std::vector<InstructionUseInfo> instructions;
+    std::unordered_map<std::string, std::vector<UseSite>> uses;
+};
+
+struct AnalysisError {
     std::string message;
     SourceLocation location;
 };
 
-struct ParseResult {
-    std::optional<Instruction> instruction;
-    std::optional<ParseError> error;
+struct AnalysisResult {
+    std::optional<DefUseInfo> info;
+    std::optional<AnalysisError> error;
 };
 
-// 在 Parser.h 中直接定义这个自由函数时，保留 inline。
-inline ParseResult parse_instruction(
-    const std::vector<Token>& tokens);
+// 实现由你完成；在头文件中定义时保留 inline。
+inline AnalysisResult analyze_def_use(
+    const std::vector<Instruction>& instructions,
+    const std::unordered_set<std::string>& external_inputs);
 ```
 
-本轮先复用 Token 保存文本、类别和位置；整数继续保存原始文本，无需转换数值。
+字段约定：
 
-返回状态约定：
+- `definitions` 只记录程序内部定义的命名值。
+- `info.instructions[i].sources[j]` 对应输入指令 i 的操作数 j。
+- 来源为 Instruction 时，defining_instruction 有值；其他来源为空。
+- 名字和常量文本从原 Instruction 中读取，不重复保存。
+- `uses` 包含内部定义和外部输入；无人使用时保留空列表。
+- 常量不加入 definitions 或 uses。
+- 成功：info 有值、error 为空。
+- 失败：info 为空、error 有值，不返回半成品。
+- 每次调用重新建立结果，不累积旧数据。
+- 空指令列表合法。
+- 分析结果只对应本次指令列表；重排指令后需要重新分析。
 
-| 输入结果 | `instruction` | `error` |
+## 6. 分析流程
+
+按指令顺序从前往后处理：
+
+1. 为外部输入建立空 uses 条目。
+2. 检查当前 destination 是否已经定义，或与外部输入重名。
+3. 按顺序分析每个 operand：
+   - Integer：记录 Constant。
+   - Value：查询 definitions，命中则记录定义者编号。
+   - 未命中 definitions，但属于 external_inputs：记录 ExternalInput。
+   - 两者都没有：报告未定义使用，位置指向当前 operand。
+   - 每个合法 Value 都添加一次 UseSite。
+4. 所有 source 成功后，再登记当前 destination。
+5. 全部成功后返回完整结果。
+
+本轮遇到第一个分析错误即可返回。
+
+注意：可以提前检查 destination 重名，但不能提前登记新定义。
+
+## 7. 必须正确处理的情况
+
+### 自引用
+
+```text
+%a = add %a, 1
+```
+
+如果 `%a` 没有前序定义、也不是外部输入，必须报错。
+
+不能先登记左侧 `%a`，让右侧查到当前指令自己。
+
+### 前向引用
+
+```text
+%b = mul %a, 2
+%a = add %x, 1
+```
+
+第一条指令仍然报错，本轮要求使用前已经定义。
+
+### 重复定义
+
+```text
+%a = add 1, 2
+%a = mul 3, 4
+```
+
+第二条报错，不覆盖旧定义。
+
+### 同一个值使用两次
+
+```text
+%a = add %x, 1
+%b = mul %a, %a
+```
+
+`%a` 的 uses 必须包含 `(1, 0)` 和 `(1, 1)`。
+
+### 外部输入
+
+查不到定义的名字不能自动当成外部输入，必须显式声明。
+
+### load、store、ret
+
+| 指令 | 命名值的 def | 命名值的 use |
 |---|---|---|
-| 成功解析一条指令 | 有值 | 无值 |
-| 解析失败 | 无值 | 有值 |
-| 空 Token 列表 | 无值 | 无值 |
+| `%a = load %ptr` | `%a` | `%ptr` |
+| `store %a, %ptr` | 无 | `%a`、`%ptr` |
+| `ret %a` | 无 | `%a` |
 
-不要同时返回有效指令和错误。
+store 会修改内存，但本轮只记录命名值的关系。
 
-### 6.3 本轮支持的指令
+无人使用的定义不报错，也不删除指令。
 
-| Opcode | 目的值 | 操作数数量 | 示例 |
-|---|---|---:|---|
-| `add` | 必须有 | 2 | `%r1 = add %r2, 42` |
-| `mul` | 必须有 | 2 | `%r1 = mul %r2, 3` |
-| `load` | 必须有 | 1 | `%r1 = load %ptr` |
-| `store` | 不能有 | 2 | `store %r1, %ptr` |
-| `ret` | 不能有 | 1 | `ret %r1` |
+## 8. 验收测试
 
-Opcode 精确匹配上表的小写名称，未知 opcode 返回错误。
+先完成三个代表性测试组：
 
-每个操作数暂时统一接受 `Value` 或 `Integer`。例如 load 地址的类型是否合理、值有没有定义，后续再由语义分析处理。
-
-### 6.4 解析流程
-
-使用索引 `pos` 从左到右读取 Token：
-
-1. 空列表直接返回“没有指令”。
-2. 如果第一个 Token 是 `Value`，记录目的值，随后必须有 `Equal`。
-3. 接下来必须是 `Identifier`，记录为 opcode。
-4. 读取操作数；操作数之间必须有逗号，逗号后必须有操作数。
-5. 检查 opcode 是否支持、目的值是否符合要求、操作数数量是否正确。
-6. 成功时必须消费完整行的 Token，不能忽略尾部内容。
-
-访问 `tokens[pos]` 前，先确认 `pos < tokens.size()`。
-
-先把过程写清楚；出现重复逻辑后，再考虑提取 `peek()`、`consume()`、`expect()`。
-
-### 6.5 错误诊断
-
-错误信息要能说明问题，文字不要求逐字固定。例如：
-
-| 输入 | 应诊断的问题 |
+| 测试组 | 检查内容 |
 |---|---|
-| `%r1 add %r2, 42` | 目的值后缺少 `=` |
-| `%r1 = add %r2 42` | 操作数之间缺少逗号 |
-| `%r1 = add %r2,` | 逗号后缺少操作数 |
-| `%r1 = add %r2` | `add` 需要两个操作数 |
-| `add %r2, 42` | `add` 缺少目的值 |
-| `%r1 = ret %r2` | `ret` 不允许目的值 |
-| `%r1 = unknown %r2` | 不支持的 opcode |
-| `ret %r1, 42` | `ret` 操作数过多 |
+| 正常关系 | 第 2 节示例的 definitions、sources、uses 全部正确 |
+| 重复使用 | 同一值作为两个 source 时记录两次 use；store/ret 没有 def |
+| 语义错误 | 未定义使用、重复定义、外部输入重名；错误位置正确且 info 为空 |
 
-这些例子用于说明规则，不要求每一项都新增独立测试。
+错误例子：
 
-错误位置约定：
+- 无外部输入时，`%a = add %missing, 1`：错误指向 `%missing`，第 10 列。
+- 重复定义 `%a`：错误指向第二次定义的 destination。
+- 声明 `%x` 为外部输入后出现 `%x = add 1, 2`：错误指向 destination。
 
-- 当前 Token 不符合预期：指向当前 Token。
-- 输入已经结束但还缺内容：指向最后一个 Token 的末尾之后，即其列号加上 `lexeme.size()`。
-- 未知 opcode、指令缺少目的值或操作数数量错误：可以指向 opcode。
-- 不该出现的目的值：可以指向目的值。
+错误文字不要求逐字固定，但要说明问题和相关名字。
 
-当前接口只接收 Token，没有行尾空白和注释信息，因此缺内容的位置按最后一个 Token 计算即可。
+测试直接检查数据结构，不只观察打印结果。
 
-## 7. 实现顺序与验收
+## 9. 编译与运行
 
-本轮交付：
+在已有 CMakeLists.txt 中追加：
 
-- `Parser.h`
-- `tests/parser_test.cpp`
-- 对应的 `CMakeLists.txt` 修改
+```cmake
+add_executable(def_use_test tests/def_use_test.cpp)
+target_include_directories(def_use_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(def_use_test PRIVATE GTest::gtest_main)
+gtest_discover_tests(def_use_test)
+```
 
-可以分几次完成：
-
-1. 定义数据结构，打通 `%r1 = add %r2, 42`。
-2. 推广到五种指令，处理有目的值和无目的值两种形式。
-3. 补上错误返回，运行代表性测试，再进行 Review。
-
-先在 `tests/parser_test.cpp` 中保留三个代表性测试：
-
-| 输入 | 检查内容 |
-|---|---|
-| `%r1 = add %r2, 42` | 成功；目的值、opcode、两个操作数及其类别正确 |
-| `store %r1, %ptr` | 成功；没有目的值，两个操作数正确 |
-| `%r1 = add %r2 42` | 失败；提示缺逗号，位置指向 `42`，即第 15 列 |
-
-测试可以先调用 Lexer，确认没有词法错误，再调用 Parser。
-
-保留原有 Lexer 测试；后续发现实际 Bug 时，再补对应回归用例。
-
-三个测试是起步验收，不代表覆盖所有非法输入。Review 时结合代码检查五种指令及上述语法规则。
-
-## 8. 编译与运行测试
-
-工程使用 C++20、CMake 和 Google Test。
-
-现有 CMake 配置会从 `~/.local` 等位置寻找 GTest，需要先确保本机已安装并可被 CMake 找到。
+保留已有 `include(GoogleTest)`，不要重复添加。
 
 在项目目录执行：
 
@@ -295,42 +281,18 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Debug 配置默认启用 ASan/UBSan。需要关闭时，在配置命令中加入：
-
-```text
--DENABLE_SANITIZERS=OFF
-```
-
-写好 `tests/parser_test.cpp` 后，在现有 `CMakeLists.txt` 的 `include(GoogleTest)` 之后加入：
-
-```cmake
-add_executable(parser_test tests/parser_test.cpp)
-target_include_directories(parser_test PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(parser_test PRIVATE GTest::gtest_main)
-gtest_discover_tests(parser_test)
-```
-
-只运行 Parser 测试时，若测试套件命名为 `ParserTest`，可以执行：
+若测试套件命名为 DefUseTest：
 
 ```bash
-ctest --test-dir build -R ParserTest --output-on-failure
+ctest --test-dir build -R DefUseTest --output-on-failure
 ```
 
-当前 `main.cpp` 仍是空入口，功能验证通过测试程序进行。
+沿用现有 C++20、Google Test 和 Sanitizer 配置。
 
-## 9. 本阶段需要理解的知识
+## 10. 完成标准
 
-| 内容 | 在本项目中的用途 |
-|---|---|
-| `std::optional` | 表示可选目的值、成功结果和错误 |
-| `const std::vector<Token>&` | 只读访问 Lexer 输出，避免复制整组 Token |
-| Token 游标 | 读取当前位置、判断、消费、推进 |
-| 错误传播 | Lexer 错误先处理，Parser 错误带位置返回 |
-| 结构体与接口 | 将识别过程和指令表示分开 |
-| 少量代表性测试 | 验证主要路径和真实错误 |
-
-完成后能说明三个问题即可：
-
-1. Lexer 与 Parser 各负责什么？
-2. 为什么 `destination` 是可选的？
-3. 为什么 `%r2` 是否定义应该留给后续分析？
+- 能查询每个命名值的定义者和所有使用位置。
+- 能查询每个操作数的来源。
+- 能区分指令结果、外部输入、常量。
+- 能正确诊断未定义使用和重复定义。
+- 代表性测试通过，提交后进行 Review。
