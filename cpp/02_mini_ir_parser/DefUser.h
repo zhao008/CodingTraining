@@ -3,6 +3,7 @@
 #include "Parser.h"
 
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -43,7 +44,7 @@ struct InstructionDefUser{
 };
 
 struct DefUseAnalysisResult {
-    std::optional<InstructionDefUser> info;
+    std::map<size_t, InstructionDefUser> info;
     std::optional<DefUseAnalysisError> error;
 };
 
@@ -55,7 +56,8 @@ public:
 
     void analyze_def_use(const std::map <size_t, ParseResult>& passer_token){
         definitions_.clear();
-        analysis_result_.clear();
+        analysis_result_.info.clear();
+        analysis_result_.error.reset();
         external_input_uses_.clear();
         InstructionId instruction_id = 0;
         
@@ -65,9 +67,8 @@ public:
            
             if(passer_line.second.error.has_value()){
                 const ParseError& passer_error = *passer_line.second.error;
-                set_error( instruction_id,
-                           "PASSER ERROR : " + passer_error.message,
-                            passer_error.location);
+                set_error("PARSER ERROR: " + passer_error.message,
+                          passer_error.location);
 
                 return;
             }
@@ -75,6 +76,14 @@ public:
             else if(passer_line.second.instruction.has_value()){
                 const Instruction& inst = *passer_line.second.instruction;
                 inst_def_user.inst = inst;
+                if (inst.destination.has_value() &&
+                    external_inputs_.contains(inst.destination->lexeme)) {
+                    set_error(
+                        "Destination conflicts with external input: " +
+                            inst.destination->lexeme,
+                        inst.destination->location);
+                    return;
+                }
                 for(size_t i = 0; i < inst.operands.size(); i++){
                     const auto& source = inst.operands[i];
                     SourceRef source_def_user{};
@@ -89,7 +98,8 @@ public:
                             source_def_user.kind = SourceKind::Instruction;
                             source_def_user.defining_instruction = inst_id->second;
                             source_def_user.operand_index = i;
-                            analysis_result_[inst_id->second].info->uses.push_back({instruction_id, i});
+                            analysis_result_.info.at(inst_id->second)
+                                .uses.push_back({instruction_id, i});
                         }
                         else if(is_external_inputs!=external_inputs_.end()){
                             source_def_user.kind = SourceKind::ExternalInput;
@@ -97,17 +107,15 @@ public:
                             external_input_uses_[source.lexeme].push_back({instruction_id, i});
                         }
                         else {
-                            set_error( instruction_id,
-                                       "Undefined value: " + source.lexeme ,
-                                       source.location);
-                         
+                            set_error("Undefined value: " + source.lexeme,
+                                      source.location);
+                            
                             return;                           
                         }                      
                     }
                     else{
-                        set_error( instruction_id,
-                                   "Illegal source kind: " + source.lexeme ,
-                                   source.location);
+                        set_error("Illegal source kind: " + source.lexeme,
+                                  source.location);
 
                         return;
                     }
@@ -119,7 +127,7 @@ public:
                     inst_def_user.dest_id = instruction_id;
                     definitions_.insert_or_assign(dest_token.lexeme, instruction_id);
                 }
-                analysis_result_[instruction_id].info = inst_def_user;  
+                analysis_result_.info[instruction_id] = std::move(inst_def_user);
                 instruction_id ++ ;
             }
 
@@ -127,7 +135,7 @@ public:
         }
     };
    
-    const  std::map<size_t, DefUseAnalysisResult>& results() const {
+    const DefUseAnalysisResult& results() const {
         return analysis_result_;
     }   
 
@@ -137,16 +145,16 @@ public:
 
 private:
     
-    void set_error(size_t line_number,
-                   std::string message,
-                   SourceLocation location) {
-        auto& result = analysis_result_[line_number];
-        result.info.reset();
-        result.error = DefUseAnalysisError{std::move(message), location};
+    void set_error(std::string message, SourceLocation location) {
+        analysis_result_.info.clear();
+        definitions_.clear();
+        external_input_uses_.clear();
+        analysis_result_.error =
+            DefUseAnalysisError{std::move(message), location};
     }
     
     std::unordered_map<std::string, InstructionId> definitions_; 
-    std::map<size_t, DefUseAnalysisResult> analysis_result_;
+    DefUseAnalysisResult analysis_result_;
     std::unordered_set<std::string> external_inputs_;
     std::unordered_map<std::string, std::vector<UseSite>> external_input_uses_;
 };  
