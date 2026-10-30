@@ -43,3 +43,6 @@ Thumbs.db
 
 # ===== Claude Code 本地配置 =====
 .claude/settings.local.json
+
+# ===== 本地工具链（体积 12GB，不入库）=====
+tool/llvm/
