@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# FileCheck 的 Python 实现（PyPI 包 filecheck==1.0.6），装在本目录的 site/ 下。
+# 只对这一条命令设置 PYTHONPATH；-s 忽略用户目录下的 pip 包，-B 不生成 __pycache__。
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH="$dir/site" exec python3 -s -B -m filecheck "$@"
