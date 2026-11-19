@@ -41,7 +41,7 @@ struct MulOnePattern
         if( !intType ){
             return mlir::failure();
         }
-        if( !( intType.isSignless() & (intType.getWidth()==32) ) ){
+        if( !( intType.isSignless() && (intType.getWidth()==32) ) ){
             return mlir::failure();
         }
         // TODO 2：检查左操作数是否为直接定义的整数常量 1。
